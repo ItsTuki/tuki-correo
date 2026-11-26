@@ -1,0 +1,45 @@
+# Publica una versión de Tuki Correo con los archivos de la rama «publicar».
+# Los .exe pasan de 100 MB, así que llegan partidos en trozos (archivo.part000, part001…) y aquí se vuelven a unir.
+# La versión queda en borrador hasta que estén los 4 archivos (instalador, portable, apk y latest.yml).
+name: Publicar versión
+on:
+  push:
+    branches: [publicar]
+permissions:
+  contents: write
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unir trozos
+        working-directory: subir
+        run: |
+          shopt -s nullglob
+          for p in *.part000; do
+            base="${p%.part000}"
+            cat "$base".part* > "$base" && rm "$base".part*
+          done
+          ls -la
+      - name: Crear o completar la versión
+        working-directory: subir
+        run: |
+          V=$(cat VERSION)
+          if ! gh release view "v$V" >/dev/null 2>&1; then
+            gh release create "v$V" --draft --title "Tuki Correo $V" --notes-file notas.md
+          fi
+          for f in *; do
+            case "$f" in VERSION|notas.md) continue;; esac
+            gh release upload "v$V" "$f" --clobber
+          done
+          NOMBRES=$(gh release view "v$V" --json assets --jq '.assets[].name')
+          echo "$NOMBRES"
+          if echo "$NOMBRES" | grep -q 'instalador.exe$' && echo "$NOMBRES" | grep -q 'portable.exe$' \
+             && echo "$NOMBRES" | grep -q '\.apk$' && echo "$NOMBRES" | grep -qx 'latest.yml'; then
+            gh release edit "v$V" --draft=false --latest
+            echo "Versión v$V publicada."
+          else
+            echo "Faltan archivos: la versión sigue en borrador."
+          fi
